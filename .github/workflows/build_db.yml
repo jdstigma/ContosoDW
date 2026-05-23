@@ -1,20 +1,18 @@
-name: Build SQLite Database
+name: Validate Pipeline
 
-# Triggers whenever schema_sqlite.sql or build_db.py changes on main
+# Triggers when core pipeline files change on main
 on:
   push:
     branches:
       - main
     paths:
-      - schema_sqlite.sql
-      - build_db.py
-
-# Needs write access to commit contoso.db back to the repo
-permissions:
-  contents: write
+      - load_data.py
+      - analysis/build_marts.sql
+      - scripts/export_for_powerbi.py
+      - setup.sh
 
 jobs:
-  build:
+  validate:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,26 +24,46 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Build contoso.db schema
-        run: python build_db.py
+      - name: Install dependencies
+        run: pip install duckdb pandas kaggle -q
 
-      - name: Load Contoso data from Kaggle (if credentials present)
+      - name: Load data from Kaggle
         if: ${{ secrets.KAGGLE_API_TOKEN != '' }}
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-        run: |
-          pip install kaggle -q
-          python load_data.py
+        run: python load_data.py
 
-      - name: Commit and push updated contoso.db
+      - name: Build AllSales mart
+        if: ${{ secrets.KAGGLE_API_TOKEN != '' }}
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add contoso.db
-          # Only commit if the db actually changed
-          if git diff --staged --quiet; then
-            echo "No changes to contoso.db — skipping commit."
-          else
-            git commit -m "chore: auto-rebuild contoso.db from schema changes [skip ci]"
-            git push
-          fi
+          python -c "
+          import duckdb
+          conn = duckdb.connect('contoso.duckdb')
+          conn.execute(open('analysis/build_marts.sql').read())
+          print('AllSales built OK')
+          conn.close()
+          "
+
+      - name: Export to Parquet
+        if: ${{ secrets.KAGGLE_API_TOKEN != '' }}
+        run: python scripts/export_for_powerbi.py
+
+      - name: Verify AllSales row count
+        if: ${{ secrets.KAGGLE_API_TOKEN != '' }}
+        run: |
+          python -c "
+          import duckdb
+          conn = duckdb.connect('contoso.duckdb', read_only=True)
+          n = conn.execute('SELECT COUNT(*) FROM AllSales').fetchone()[0]
+          conn.close()
+          print(f'AllSales rows: {n:,}')
+          assert n > 10_000_000, f'Expected >10M rows, got {n}'
+          print('Row count check passed.')
+          "
+
+      - name: Syntax check (no Kaggle credentials)
+        if: ${{ secrets.KAGGLE_API_TOKEN == '' }}
+        run: |
+          python -c "import duckdb, load_data, scripts.export_for_powerbi; print('Imports OK')" || true
+          python -m py_compile load_data.py scripts/export_for_powerbi.py profiling/profile_data.py
+          echo "Syntax checks passed."

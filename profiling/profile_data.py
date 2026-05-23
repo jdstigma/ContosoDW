@@ -1,8 +1,8 @@
 """
 profiling/profile_data.py
-Data profiling for contoso.db — SQL-based, zero memory overhead.
+Data profiling for contoso.duckdb — SQL-based, zero memory overhead.
 
-All stats are computed inside SQLite (no full table loads into pandas).
+All stats are computed inside DuckDB (no full table loads into pandas).
 Safe to run against tables with millions of rows.
 
 Produces per-table summaries:
@@ -10,7 +10,7 @@ Produces per-table summaries:
   - Null count and % per column
   - Distinct value count per column
   - Min / Max / Avg for numeric columns
-  - Min / Max date for date-like columns
+  - Min / Max for date-like columns
   - Top-5 most frequent values for low-cardinality columns
 
 Output saved to: profiling/reports/profile_YYYYMMDD_HHMMSS.txt
@@ -22,12 +22,18 @@ Usage (run from repo root):
 """
 
 import os
-import sqlite3
 import sys
 from datetime import datetime
 
+try:
+    import duckdb
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "duckdb", "-q"])
+    import duckdb
+
 REPO_ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH     = os.path.join(REPO_ROOT, "contoso.db")
+DB_PATH     = os.path.join(REPO_ROOT, "contoso.duckdb")
 REPORTS_DIR = os.path.join(REPO_ROOT, "profiling", "reports")
 
 FREQ_CARD_LIMIT = 50   # max distinct values before skipping top-N frequency
@@ -46,31 +52,33 @@ def section(title):  return f"\n{rule('═')}\n  {title}\n{rule('═')}"
 
 def get_tables(conn):
     rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = 'main' ORDER BY table_name;"
     ).fetchall()
     return [r[0] for r in rows]
 
 
 def get_columns(conn, table):
     """Return list of (col_name, col_type) for a table."""
-    rows = conn.execute(f"PRAGMA table_info([{table}]);").fetchall()
-    return [(r[1], r[2].upper()) for r in rows]
+    rows = conn.execute(f'DESCRIBE "{table}";').fetchall()
+    # DESCRIBE returns: column_name, column_type, null, key, default, extra
+    return [(r[0], r[1].upper()) for r in rows]
 
 
 # ── SQL-based per-column stats ────────────────────────────────────────────────
 
 def row_count(conn, table):
-    return conn.execute(f"SELECT COUNT(*) FROM [{table}];").fetchone()[0]
+    return conn.execute(f'SELECT COUNT(*) FROM "{table}";').fetchone()[0]
 
 
 def col_stats(conn, table, col, n_rows):
     """Null count, distinct count — always safe regardless of row count."""
     null_count = conn.execute(
-        f"SELECT COUNT(*) FROM [{table}] WHERE [{col}] IS NULL;"
+        f'SELECT COUNT(*) FROM "{table}" WHERE "{col}" IS NULL;'
     ).fetchone()[0]
 
     distinct = conn.execute(
-        f"SELECT COUNT(DISTINCT [{col}]) FROM [{table}];"
+        f'SELECT COUNT(DISTINCT "{col}") FROM "{table}";'
     ).fetchone()[0]
 
     null_pct = f"{null_count / n_rows * 100:5.1f}%" if n_rows else "  n/a"
@@ -80,7 +88,7 @@ def col_stats(conn, table, col, n_rows):
 def numeric_stats(conn, table, col):
     """Min, max, avg for a numeric column."""
     row = conn.execute(
-        f"SELECT MIN([{col}]), MAX([{col}]), AVG([{col}]) FROM [{table}];"
+        f'SELECT MIN("{col}"), MAX("{col}"), AVG("{col}") FROM "{table}";'
     ).fetchone()
     return row  # (min, max, avg)
 
@@ -88,7 +96,7 @@ def numeric_stats(conn, table, col):
 def date_range(conn, table, col):
     """Min and max for a date-like column."""
     row = conn.execute(
-        f"SELECT MIN([{col}]), MAX([{col}]) FROM [{table}];"
+        f'SELECT MIN("{col}"), MAX("{col}") FROM "{table}";'
     ).fetchone()
     return row  # (min, max)
 
@@ -97,10 +105,10 @@ def top_values(conn, table, col, n=TOP_N):
     """Top-N most frequent non-null values."""
     rows = conn.execute(
         f"""
-        SELECT [{col}], COUNT(*) AS cnt
-        FROM [{table}]
-        WHERE [{col}] IS NOT NULL
-        GROUP BY [{col}]
+        SELECT "{col}", COUNT(*) AS cnt
+        FROM "{table}"
+        WHERE "{col}" IS NOT NULL
+        GROUP BY "{col}"
         ORDER BY cnt DESC
         LIMIT {n};
         """
@@ -110,12 +118,22 @@ def top_values(conn, table, col, n=TOP_N):
 
 # ── Type helpers ──────────────────────────────────────────────────────────────
 
+NUMERIC_TYPES = ("INT", "BIGINT", "HUGEINT", "SMALLINT", "TINYINT",
+                 "FLOAT", "DOUBLE", "DECIMAL", "REAL", "NUMERIC")
+
+DATE_TYPES = ("DATE", "TIMESTAMP", "TIME")
+
+
 def is_numeric(col_type):
-    return any(t in col_type for t in ("INT", "REAL", "NUMERIC", "FLOAT", "DOUBLE"))
+    return any(t in col_type for t in NUMERIC_TYPES)
 
 
-def is_date_col(col_name, col_type):
-    return "date" in col_name.lower() and "TEXT" in col_type
+def is_date(col_type):
+    return any(t in col_type for t in DATE_TYPES)
+
+
+def is_date_name(col_name):
+    return "date" in col_name.lower() or "time" in col_name.lower()
 
 
 # ── Per-table profiler ────────────────────────────────────────────────────────
@@ -135,9 +153,9 @@ def profile_table(conn, table):
 
     # ── Column overview ───────────────────────────────────────────────────────
     lines.append(
-        f"\n  {'Column':<35} {'SQLite Type':<10} {'Nulls':>8}  {'%Null':>6}  {'Distinct':>9}"
+        f"\n  {'Column':<35} {'DuckDB Type':<14} {'Nulls':>8}  {'%Null':>6}  {'Distinct':>9}"
     )
-    lines.append(f"  {'─'*35} {'─'*10} {'─'*8}  {'─'*6}  {'─'*9}")
+    lines.append(f"  {'─'*35} {'─'*14} {'─'*8}  {'─'*6}  {'─'*9}")
 
     num_cols  = []
     date_cols = []
@@ -146,28 +164,28 @@ def profile_table(conn, table):
     for col, ctype in columns:
         null_count, null_pct, distinct = col_stats(conn, table, col, n_rows)
         lines.append(
-            f"  {col:<35} {ctype:<10} {null_count:>8,}  {null_pct:>6}  {distinct:>9,}"
+            f"  {col:<35} {ctype:<14} {null_count:>8,}  {null_pct:>6}  {distinct:>9,}"
         )
         if is_numeric(ctype):
             num_cols.append(col)
-        elif is_date_col(col, ctype):
+        elif is_date(ctype) or (is_date_name(col) and "VARCHAR" in ctype):
             date_cols.append(col)
-        elif distinct <= FREQ_CARD_LIMIT and distinct > 1:
+        elif 1 < distinct <= FREQ_CARD_LIMIT:
             text_cols.append((col, distinct))
 
     # ── Numeric statistics ────────────────────────────────────────────────────
     if num_cols:
         lines.append(f"\n  {'── Numeric statistics ':-<{W-2}}")
         lines.append(
-            f"\n  {'Column':<35} {'Min':>12} {'Avg':>12} {'Max':>12}"
+            f"\n  {'Column':<35} {'Min':>14} {'Avg':>14} {'Max':>14}"
         )
-        lines.append(f"  {'─'*35} {'─'*12} {'─'*12} {'─'*12}")
+        lines.append(f"  {'─'*35} {'─'*14} {'─'*14} {'─'*14}")
         for col in num_cols:
             mn, mx, avg = numeric_stats(conn, table, col)
             mn  = f"{mn:,.2f}"  if mn  is not None else "NULL"
             mx  = f"{mx:,.2f}"  if mx  is not None else "NULL"
             avg = f"{avg:,.2f}" if avg is not None else "NULL"
-            lines.append(f"  {col:<35} {mn:>12} {avg:>12} {mx:>12}")
+            lines.append(f"  {col:<35} {mn:>14} {avg:>14} {mx:>14}")
 
     # ── Date ranges ───────────────────────────────────────────────────────────
     if date_cols:
@@ -180,7 +198,7 @@ def profile_table(conn, table):
 
     # ── Top-N frequencies ─────────────────────────────────────────────────────
     if text_cols:
-        lines.append(f"\n  {'── Top {TOP_N} values (low-cardinality columns) ':-<{W-2}}")
+        lines.append(f"\n  {'── Top ' + str(TOP_N) + ' values (low-cardinality columns) ':-<{W-2}}")
         for col, _ in text_cols:
             top = top_values(conn, table, col)
             if not top:
@@ -216,10 +234,10 @@ def summary_table(conn, tables):
 
 def main():
     if not os.path.exists(DB_PATH):
-        print(f"ERROR: {DB_PATH} not found. Run build_db.py first.")
+        print(f"ERROR: {DB_PATH} not found. Run ./setup.sh first.")
         sys.exit(1)
 
-    conn       = sqlite3.connect(DB_PATH)
+    conn       = duckdb.connect(DB_PATH, read_only=True)
     all_tables = get_tables(conn)
 
     # Parse args
