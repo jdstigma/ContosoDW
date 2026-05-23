@@ -42,6 +42,28 @@ eta_from() {
     echo $sum
 }
 
+# ── Row count summary ────────────────────────────────────────────────────────
+
+show_counts() {
+    python - <<'PYEOF'
+import sqlite3, os
+conn = sqlite3.connect("contoso.db")
+tables = [r[0] for r in conn.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+).fetchall()]
+print(f"\n  {'Table':<35} {'Rows':>12}")
+print(f"  {'─'*35} {'─'*12}")
+total = 0
+for t in tables:
+    n = conn.execute(f"SELECT COUNT(*) FROM [{t}];").fetchone()[0]
+    total += n
+    print(f"  {t:<35} {n:>12,}")
+print(f"  {'─'*35} {'─'*12}")
+print(f"  {'TOTAL':<35} {total:>12,}")
+conn.close()
+PYEOF
+}
+
 # ── Step runner ───────────────────────────────────────────────────────────────
 
 run_step() {
@@ -75,7 +97,9 @@ echo "════════════════════════�
 
 run_step build  "Building schema"             python build_db.py
 run_step load   "Loading data from Kaggle"    python load_data.py
+show_counts
 run_step marts  "Building analytical tables"  bash -c "sqlite3 contoso.db < analysis/build_marts.sql"
+show_counts
 
 if python -c "import pyarrow" 2>/dev/null; then
     run_step export "Exporting to Parquet"    python scripts/export_for_powerbi.py
