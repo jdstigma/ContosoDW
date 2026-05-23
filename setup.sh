@@ -131,15 +131,26 @@ echo "════════════════════════�
 echo "  ContosoDW Setup${FORCE:+  [--force]}"
 echo "════════════════════════════════════════════════════════════════"
 
-# Step 1 — Build schema
-FACT_ROWS=$(row_count FactSales)
-if $FORCE || [[ $FACT_ROWS -eq 0 ]]; then
+# Step 1 — Build schema (only if db doesn't exist or has no tables)
+SCHEMA_OK=$(python -c "
+import sqlite3, os
+try:
+    conn = sqlite3.connect('contoso.db')
+    n = conn.execute(\"SELECT COUNT(*) FROM sqlite_master WHERE type='table';\").fetchone()[0]
+    conn.close()
+    print('yes' if n > 0 else 'no')
+except:
+    print('no')
+" 2>/dev/null)
+
+if $FORCE || [[ "$SCHEMA_OK" != "yes" ]]; then
     run_step build "Building schema" python build_db.py
 else
-    skip_step build "Building schema" "contoso.db already has data"
+    skip_step build "Building schema" "schema already exists"
 fi
 
-# Step 2 — Load data
+# Step 2 — Load data (skips tables that already have rows)
+FACT_ROWS=$(row_count FactSales)
 if $FORCE || [[ $FACT_ROWS -eq 0 ]]; then
     run_step load "Loading data from Kaggle" python load_data.py
     show_counts

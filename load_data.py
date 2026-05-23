@@ -243,9 +243,14 @@ def main():
                     count = sum(1 for _ in f) - 1  # subtract header
                 print(f"{table_name:<35} {count:>10,}  (dry run)")
             else:
-                count = load_csv_into_table(conn, table_name, csv_path)
-                # Clear the progress line then print the final count
-                print(f"{table_name:<35} {count:>10,}          ")
+                existing = conn.execute(
+                    f"SELECT COUNT(*) FROM [{table_name}];"
+                ).fetchone()[0]
+                if existing > 0:
+                    print(f"{table_name:<35} {existing:>10,}  (already loaded — skipped)")
+                else:
+                    count = load_csv_into_table(conn, table_name, csv_path)
+                    print(f"{table_name:<35} {count:>10,}          ")
 
             loaded += 1
 
