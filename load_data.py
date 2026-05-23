@@ -128,7 +128,7 @@ def get_db_columns(conn, table_name):
     return {row[1].lower(): row[1] for row in rows}
 
 
-CHUNK_SIZE = 5_000  # rows per batch — keeps memory low for large Fact tables
+CHUNK_SIZE = 50_000  # rows per batch — balance between memory and commit overhead
 
 
 def load_csv_into_table(conn, table_name, csv_path):
@@ -220,7 +220,7 @@ def main():
         conn = sqlite3.connect(DB_PATH)
         conn.execute("PRAGMA foreign_keys = OFF")   # skip FK checks during bulk load
         conn.execute("PRAGMA journal_mode = WAL")   # faster writes
-        conn.execute("PRAGMA synchronous  = NORMAL")
+        conn.execute("PRAGMA synchronous  = OFF")   # fastest writes — safe for bulk load
 
         db_tables = get_db_tables(conn)
 
