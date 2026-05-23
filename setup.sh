@@ -130,7 +130,7 @@ run_step() {
     "$@"
 
     kill $TIMER_PID 2>/dev/null
-    wait $TIMER_PID 2>/dev/null
+    wait $TIMER_PID 2>/dev/null || true
     local elapsed=$(( $(date +%s) - t0 ))
 
     T[$key]=$elapsed
