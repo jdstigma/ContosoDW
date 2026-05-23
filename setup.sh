@@ -12,8 +12,12 @@ TIMINGS_FILE=".step_timings"
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 fmt() {
-    # Format seconds as MM:SS
-    printf "%02d:%02d" $(($1 / 60)) $(($1 % 60))
+    # Under 60s: show seconds only. 60s+: show Xm Ys.
+    if [[ $1 -lt 60 ]]; then
+        printf "%ds" "$1"
+    else
+        printf "%dm %ds" $(($1 / 60)) $(($1 % 60))
+    fi
 }
 
 # ── Load timings from last run ────────────────────────────────────────────────
