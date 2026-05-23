@@ -91,6 +91,7 @@ run_step() {
     local elapsed=$(( $(date +%s) - t0 ))
 
     T[$key]=$elapsed
+    echo ""
     printf "  └─ done in %s\n" "$(fmt $elapsed)"
 }
 
