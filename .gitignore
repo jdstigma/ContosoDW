@@ -9,6 +9,9 @@
 __pycache__/
 *.pyc
 
+# Generated profile reports (kept locally, not committed)
+profiling/reports/*.txt
+
 # OS
 .DS_Store
 Thumbs.db
