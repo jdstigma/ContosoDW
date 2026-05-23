@@ -10,6 +10,9 @@ __pycache__/
 # Generated profile reports (kept locally, not committed)
 profiling/reports/*.txt
 
+# Power BI exports (large Parquet files, built locally)
+exports/
+
 # OS
 .DS_Store
 Thumbs.db
