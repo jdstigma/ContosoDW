@@ -1,21 +1,20 @@
-# Power BI Python Data Source — AllSales
+# Power BI Python Data Source — AllSales (DuckDB)
 #
 # How to use:
-#   1. In Power BI Desktop: Home → Get Data → More → Other → Python Script
+#   1. Power BI Desktop: Home → Get Data → Other → Python Script
 #   2. Paste this script and click OK
 #   3. Select the "dataset" table from the Navigator
 #
-# Requirements on your local machine:
-#   pip install pandas
+# Requirements:
+#   pip install duckdb
 #
-# The db path below assumes you cloned the repo to the default location.
-# Update DB_PATH if yours differs.
+# Update DB_PATH if your repo is in a different location.
 
-import sqlite3
+import duckdb
 import pandas as pd
 
-DB_PATH = r"C:\Users\jdsti\OneDrive\Desktop\Projects\ContosoDW\contoso.db"
+DB_PATH = r"C:\Users\jdsti\OneDrive\Desktop\Projects\ContosoDW\contoso.duckdb"
 
-conn    = sqlite3.connect(DB_PATH)
-dataset = pd.read_sql_query("SELECT * FROM AllSales;", conn)
+conn    = duckdb.connect(DB_PATH, read_only=True)
+dataset = conn.execute("SELECT * FROM AllSales").df()
 conn.close()

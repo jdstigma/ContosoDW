@@ -1,13 +1,12 @@
 -- analysis/build_marts.sql
--- Materializes analytical tables into contoso.db.
--- Run after build_db.py + load_data.py, or via setup.sh.
+-- Materializes AllSales into contoso.duckdb.
+-- Run after load_data.py, or via setup.sh.
 --
---   sqlite3 contoso.db < analysis/build_marts.sql
+--   duckdb contoso.duckdb < analysis/build_marts.sql
 
 -- ============================================================
 -- AllSales
 -- FactSales + FactOnlineSales merged and fully de-normalised.
--- Ready for direct import into Power BI / Excel / notebooks.
 -- ============================================================
 
 DROP TABLE IF EXISTS AllSales;
@@ -16,19 +15,19 @@ CREATE TABLE AllSales AS
 
 WITH merged AS (
 
-    -- In-store / catalog / reseller sales (FactSales)
+    -- In-store / catalog / reseller sales
     SELECT
         'Store'                  AS SaleSource,
         fs.SalesKey              AS SaleKey,
         NULL                     AS SalesOrderNumber,
-        NULL                     AS SalesOrderLineNumber,
+        NULL::INTEGER            AS SalesOrderLineNumber,
         fs.DateKey,
         fs.channelKey            AS ChannelKey,
         fs.StoreKey,
         fs.ProductKey,
         fs.PromotionKey,
         fs.CurrencyKey,
-        NULL                     AS CustomerKey,
+        NULL::INTEGER            AS CustomerKey,
         fs.SalesQuantity,
         fs.SalesAmount,
         fs.ReturnQuantity,
@@ -42,14 +41,14 @@ WITH merged AS (
 
     UNION ALL
 
-    -- Online sales (FactOnlineSales)
+    -- Online sales
     SELECT
         'Online'                 AS SaleSource,
         fos.OnlineSalesKey       AS SaleKey,
         fos.SalesOrderNumber,
         fos.SalesOrderLineNumber,
         fos.DateKey,
-        NULL                     AS ChannelKey,
+        NULL::INTEGER            AS ChannelKey,
         fos.StoreKey,
         fos.ProductKey,
         fos.PromotionKey,
@@ -70,13 +69,13 @@ WITH merged AS (
 
 SELECT
 
-    -- ── Identifiers ───────────────────────────────────────────
+    -- Identifiers
     s.SaleSource,
     s.SaleKey,
     s.SalesOrderNumber,
     s.SalesOrderLineNumber,
 
-    -- ── Date ──────────────────────────────────────────────────
+    -- Date
     s.DateKey,
     d.CalendarYear,
     d.CalendarQuarter,
@@ -86,10 +85,10 @@ SELECT
     d.FiscalYear,
     d.FiscalQuarter,
 
-    -- ── Channel ───────────────────────────────────────────────
+    -- Channel
     COALESCE(ch.ChannelName, 'Online')  AS ChannelName,
 
-    -- ── Store ─────────────────────────────────────────────────
+    -- Store
     s.StoreKey,
     st.StoreName,
     st.StoreType,
@@ -98,13 +97,13 @@ SELECT
     st.EmployeeCount,
     st.SellingAreaSize,
 
-    -- ── Store geography ───────────────────────────────────────
+    -- Store geography
     sg.CityName                         AS StoreCity,
     sg.StateProvinceName                AS StoreState,
     sg.RegionCountryName                AS StoreCountry,
     sg.ContinentName                    AS StoreContinent,
 
-    -- ── Product ───────────────────────────────────────────────
+    -- Product
     s.ProductKey,
     p.ProductName,
     p.BrandName,
@@ -115,7 +114,7 @@ SELECT
     pc.ProductCategoryName,
     psc.ProductSubcategoryName,
 
-    -- ── Customer (online sales only, NULL for store) ──────────
+    -- Customer (online only)
     s.CustomerKey,
     CASE
         WHEN c.FirstName IS NOT NULL
@@ -130,23 +129,23 @@ SELECT
     c.NumberCarsOwned,
     c.TotalChildren,
 
-    -- ── Customer geography (online only) ──────────────────────
+    -- Customer geography (online only)
     cg.CityName                         AS CustomerCity,
     cg.StateProvinceName                AS CustomerState,
     cg.RegionCountryName                AS CustomerCountry,
     cg.ContinentName                    AS CustomerContinent,
 
-    -- ── Promotion ─────────────────────────────────────────────
+    -- Promotion
     pr.PromotionName,
     pr.PromotionType,
     pr.PromotionCategory,
     pr.DiscountPercent,
 
-    -- ── Currency ──────────────────────────────────────────────
+    -- Currency
     cu.CurrencyLabel,
     cu.CurrencyName,
 
-    -- ── Measures ──────────────────────────────────────────────
+    -- Measures
     s.SalesQuantity,
     s.SalesAmount,
     s.ReturnQuantity,
@@ -157,14 +156,13 @@ SELECT
     s.UnitCost,
     s.UnitPrice,
 
-    -- ── Derived measures ──────────────────────────────────────
-    s.SalesAmount - s.TotalCost         AS GrossProfit,
+    -- Derived measures
+    s.SalesAmount - s.TotalCost                         AS GrossProfit,
     CASE
         WHEN s.SalesAmount > 0
         THEN ROUND((s.SalesAmount - s.TotalCost) / s.SalesAmount * 100, 2)
-    END                                 AS GrossMarginPct,
-    s.SalesAmount
-        - COALESCE(s.ReturnAmount, 0)   AS NetSalesAmount
+    END                                                 AS GrossMarginPct,
+    s.SalesAmount - COALESCE(s.ReturnAmount, 0)         AS NetSalesAmount
 
 FROM merged s
 
@@ -180,15 +178,9 @@ LEFT JOIN DimGeography          cg   ON c.GeographyKey    = cg.GeographyKey
 LEFT JOIN DimPromotion          pr   ON s.PromotionKey    = pr.PromotionKey
 LEFT JOIN DimCurrency           cu   ON s.CurrencyKey     = cu.CurrencyKey;
 
--- Index the most common Power BI filter columns
-CREATE INDEX IF NOT EXISTS IX_AllSales_CalendarYear    ON AllSales (CalendarYear);
-CREATE INDEX IF NOT EXISTS IX_AllSales_ChannelName     ON AllSales (ChannelName);
-CREATE INDEX IF NOT EXISTS IX_AllSales_StoreCountry    ON AllSales (StoreCountry);
-CREATE INDEX IF NOT EXISTS IX_AllSales_ProductCategory ON AllSales (ProductCategoryName);
-CREATE INDEX IF NOT EXISTS IX_AllSales_SaleSource      ON AllSales (SaleSource);
-
+-- Verification
 SELECT
-    COUNT(*)                        AS TotalRows,
+    COUNT(*)                                        AS TotalRows,
     SUM(CASE WHEN SaleSource = 'Store'  THEN 1 END) AS StoreRows,
     SUM(CASE WHEN SaleSource = 'Online' THEN 1 END) AS OnlineRows
 FROM AllSales;

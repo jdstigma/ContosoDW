@@ -1,7 +1,9 @@
-# SQLite database files — built locally, never committed
+# Database files — built locally, never committed
 *.db-shm
 *.db-wal
 *.db
+*.duckdb
+*.duckdb.wal
 
 # Python
 __pycache__/
