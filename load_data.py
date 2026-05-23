@@ -164,7 +164,9 @@ def load_csv_into_table(conn, table_name, csv_path):
         )
 
         def row_to_values(row):
-            return [row.get(h) or None for h in col_map]
+            # Preserve empty strings as-is — avoids converting "" to NULL
+            # which would violate NOT NULL constraints and silently drop rows
+            return [row.get(h) for h in col_map]
 
         total = 0
         chunk = [row_to_values(first_row)]
