@@ -5,17 +5,18 @@ Downloads the Contoso retail CSV dataset from Kaggle and loads it into contoso.d
 ── Setup ──────────────────────────────────────────────────────────────────────
 1. Get a free Kaggle account at https://www.kaggle.com
 2. Go to Account → Settings → API → Create New Token
-   This downloads kaggle.json with your username and key.
+   Kaggle will show a popup with your token (starts with KGAT_...).
 
 3. Place credentials using ONE of these methods:
 
-   A) File (local / Codespaces):
-      Linux/Mac:  ~/.kaggle/kaggle.json
-      Windows:    %USERPROFILE%\\.kaggle\\kaggle.json
+   A) File (local / Codespaces terminal):
+      mkdir -p ~/.kaggle && echo YOUR_TOKEN > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
 
-   B) Environment variables (Codespaces secrets / CI):
-      KAGGLE_USERNAME=your_username
-      KAGGLE_KEY=your_api_key
+   B) Environment variable:
+      export KAGGLE_API_TOKEN=YOUR_TOKEN
+
+   C) Codespaces / GitHub Actions secret:
+      Add KAGGLE_API_TOKEN as a repository secret under Settings → Secrets
 
 ── Usage ───────────────────────────────────────────────────────────────────────
     python load_data.py            # full load
@@ -53,32 +54,56 @@ def ensure_kaggle_package():
 
 def setup_kaggle_credentials():
     """
-    Write kaggle.json from env vars if the file doesn't already exist.
-    This lets Codespaces/CI pass credentials via repository secrets.
+    Resolve Kaggle credentials, supporting both the new single-token format
+    (KGAT_... via KAGGLE_API_TOKEN env var or ~/.kaggle/access_token)
+    and the legacy username+key format (kaggle.json / KAGGLE_USERNAME+KAGGLE_KEY).
     """
-    creds_dir  = os.path.expanduser("~/.kaggle")
-    creds_file = os.path.join(creds_dir, "kaggle.json")
+    creds_dir = os.path.expanduser("~/.kaggle")
+    os.makedirs(creds_dir, exist_ok=True)
 
-    if os.path.exists(creds_file):
-        return  # already set up
+    access_token_file = os.path.join(creds_dir, "access_token")
+    kaggle_json_file  = os.path.join(creds_dir, "kaggle.json")
+
+    # ── New format: single KAGGLE_API_TOKEN ──────────────────────────────────
+    api_token = os.environ.get("KAGGLE_API_TOKEN")
+    if api_token:
+        # Write to access_token file so the kaggle package picks it up
+        with open(access_token_file, "w") as f:
+            f.write(api_token.strip())
+        os.chmod(access_token_file, 0o600)
+        print("Kaggle credentials set from KAGGLE_API_TOKEN.")
+        return
+
+    if os.path.exists(access_token_file):
+        print("Kaggle access_token file found.")
+        return
+
+    # ── Legacy format: username + key ────────────────────────────────────────
+    if os.path.exists(kaggle_json_file):
+        print("Kaggle kaggle.json file found.")
+        return
 
     username = os.environ.get("KAGGLE_USERNAME")
     key      = os.environ.get("KAGGLE_KEY")
+    if username and key:
+        with open(kaggle_json_file, "w") as f:
+            json.dump({"username": username, "key": key}, f)
+        os.chmod(kaggle_json_file, 0o600)
+        print("Kaggle credentials written from KAGGLE_USERNAME / KAGGLE_KEY.")
+        return
 
-    if not username or not key:
-        print(
-            "ERROR: Kaggle credentials not found.\n"
-            "  Option A — place kaggle.json at ~/.kaggle/kaggle.json\n"
-            "  Option B — set KAGGLE_USERNAME and KAGGLE_KEY environment variables\n"
-            "  Get your token at: https://www.kaggle.com/settings → API"
-        )
-        sys.exit(1)
-
-    os.makedirs(creds_dir, exist_ok=True)
-    with open(creds_file, "w") as f:
-        json.dump({"username": username, "key": key}, f)
-    os.chmod(creds_file, 0o600)
-    print("Kaggle credentials written from environment variables.")
+    # ── Nothing found ────────────────────────────────────────────────────────
+    print(
+        "ERROR: Kaggle credentials not found.\n\n"
+        "  Option A — save your token to a file:\n"
+        "    mkdir -p ~/.kaggle\n"
+        "    echo YOUR_KGAT_TOKEN > ~/.kaggle/access_token\n"
+        "    chmod 600 ~/.kaggle/access_token\n\n"
+        "  Option B — set an environment variable:\n"
+        "    export KAGGLE_API_TOKEN=YOUR_KGAT_TOKEN\n\n"
+        "  Get your token at: https://www.kaggle.com/settings → API"
+    )
+    sys.exit(1)
 
 
 def download_dataset(dest_dir):

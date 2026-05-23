@@ -26,8 +26,16 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Build contoso.db
+      - name: Build contoso.db schema
         run: python build_db.py
+
+      - name: Load Contoso data from Kaggle (if credentials present)
+        if: ${{ secrets.KAGGLE_API_TOKEN != '' }}
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          pip install kaggle -q
+          python load_data.py
 
       - name: Commit and push updated contoso.db
         run: |
