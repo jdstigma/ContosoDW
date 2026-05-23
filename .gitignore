@@ -13,6 +13,9 @@ profiling/reports/*.txt
 # Power BI exports (large Parquet files, built locally)
 exports/
 
+# Step timing cache (local state for setup.sh progress estimates)
+.step_timings
+
 # OS
 .DS_Store
 Thumbs.db
