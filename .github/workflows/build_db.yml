@@ -1,20 +1,20 @@
-name: Validate SQLite Schema
+name: Build SQLite Database
 
-# Triggers whenever schema or build script changes on main
+# Triggers whenever schema_sqlite.sql or build_db.py changes on main
 on:
   push:
     branches:
       - main
     paths:
       - schema_sqlite.sql
-      - indexes_sqlite.sql
       - build_db.py
 
+# Needs write access to commit contoso.db back to the repo
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,7 +26,26 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Build and validate schema
+      - name: Build contoso.db schema
+        run: python build_db.py
+
+      - name: Load Contoso data from Kaggle (if credentials present)
+        if: ${{ secrets.KAGGLE_API_TOKEN != '' }}
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          python build_db.py
-          echo "Schema valid — contoso.db built successfully (not committed)."
+          pip install kaggle -q
+          python load_data.py
+
+      - name: Commit and push updated contoso.db
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add contoso.db
+          # Only commit if the db actually changed
+          if git diff --staged --quiet; then
+            echo "No changes to contoso.db — skipping commit."
+          else
+            git commit -m "chore: auto-rebuild contoso.db from schema changes [skip ci]"
+            git push
+          fi
