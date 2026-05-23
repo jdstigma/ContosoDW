@@ -1,87 +1,133 @@
 """
 profiling/profile_data.py
-Data profiling for contoso.db using pandas and SQLAlchemy.
+Data profiling for contoso.db — SQL-based, zero memory overhead.
 
-Produces per-table summaries covering:
+All stats are computed inside SQLite (no full table loads into pandas).
+Safe to run against tables with millions of rows.
+
+Produces per-table summaries:
   - Row & column counts
-  - Null counts and percentages per column
-  - Distinct value counts per column
-  - Numeric stats (min, max, mean, std)
-  - Date range (min, max) for date-like columns
-  - Top 5 most frequent values for low-cardinality text columns
+  - Null count and % per column
+  - Distinct value count per column
+  - Min / Max / Avg for numeric columns
+  - Min / Max date for date-like columns
+  - Top-5 most frequent values for low-cardinality columns
 
 Output saved to: profiling/reports/profile_YYYYMMDD_HHMMSS.txt
 
 Usage (run from repo root):
-    pip install pandas sqlalchemy
     python profiling/profile_data.py
-    python profiling/profile_data.py --table DimCustomer   # one table only
     python profiling/profile_data.py --summary             # row/col counts only
+    python profiling/profile_data.py --table DimCustomer   # single table
 """
 
 import os
+import sqlite3
 import sys
 from datetime import datetime
 
-# Resolve paths relative to repo root (one level up from this script)
 REPO_ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH     = os.path.join(REPO_ROOT, "contoso.db")
 REPORTS_DIR = os.path.join(REPO_ROOT, "profiling", "reports")
 
-FREQ_CARD_LIMIT = 50   # max distinct values before skipping top-N
+FREQ_CARD_LIMIT = 50   # max distinct values before skipping top-N frequency
 TOP_N           = 5    # number of top values to show
 
 
-# ── Package check ─────────────────────────────────────────────────────────────
+# ── Formatting ────────────────────────────────────────────────────────────────
 
-def ensure_packages():
-    import subprocess
-    for pkg in ("pandas", "sqlalchemy"):
-        try:
-            __import__(pkg)
-        except ImportError:
-            print(f"Installing {pkg}...")
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", pkg, "-q"]
-            )
+W = 74
 
-ensure_packages()
-
-import pandas as pd
-from sqlalchemy import create_engine, inspect
+def rule(char="─"): return char * W
+def section(title):  return f"\n{rule('═')}\n  {title}\n{rule('═')}"
 
 
-# ── Formatting helpers ────────────────────────────────────────────────────────
+# ── Schema introspection ──────────────────────────────────────────────────────
 
-def divider(char="─", width=72):
-    return char * width
+def get_tables(conn):
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+    ).fetchall()
+    return [r[0] for r in rows]
 
-def section(title):
-    return f"\n{divider('═')}\n  {title}\n{divider('═')}"
 
-def is_date_col(series):
-    if "date" not in series.name.lower():
-        return False
-    sample = series.dropna().head(20)
-    try:
-        pd.to_datetime(sample)
-        return True
-    except Exception:
-        return False
+def get_columns(conn, table):
+    """Return list of (col_name, col_type) for a table."""
+    rows = conn.execute(f"PRAGMA table_info([{table}]);").fetchall()
+    return [(r[1], r[2].upper()) for r in rows]
+
+
+# ── SQL-based per-column stats ────────────────────────────────────────────────
+
+def row_count(conn, table):
+    return conn.execute(f"SELECT COUNT(*) FROM [{table}];").fetchone()[0]
+
+
+def col_stats(conn, table, col, n_rows):
+    """Null count, distinct count — always safe regardless of row count."""
+    null_count = conn.execute(
+        f"SELECT COUNT(*) FROM [{table}] WHERE [{col}] IS NULL;"
+    ).fetchone()[0]
+
+    distinct = conn.execute(
+        f"SELECT COUNT(DISTINCT [{col}]) FROM [{table}];"
+    ).fetchone()[0]
+
+    null_pct = f"{null_count / n_rows * 100:5.1f}%" if n_rows else "  n/a"
+    return null_count, null_pct, distinct
+
+
+def numeric_stats(conn, table, col):
+    """Min, max, avg for a numeric column."""
+    row = conn.execute(
+        f"SELECT MIN([{col}]), MAX([{col}]), AVG([{col}]) FROM [{table}];"
+    ).fetchone()
+    return row  # (min, max, avg)
+
+
+def date_range(conn, table, col):
+    """Min and max for a date-like column."""
+    row = conn.execute(
+        f"SELECT MIN([{col}]), MAX([{col}]) FROM [{table}];"
+    ).fetchone()
+    return row  # (min, max)
+
+
+def top_values(conn, table, col, n=TOP_N):
+    """Top-N most frequent non-null values."""
+    rows = conn.execute(
+        f"""
+        SELECT [{col}], COUNT(*) AS cnt
+        FROM [{table}]
+        WHERE [{col}] IS NOT NULL
+        GROUP BY [{col}]
+        ORDER BY cnt DESC
+        LIMIT {n};
+        """
+    ).fetchall()
+    return rows  # [(value, count), ...]
+
+
+# ── Type helpers ──────────────────────────────────────────────────────────────
+
+def is_numeric(col_type):
+    return any(t in col_type for t in ("INT", "REAL", "NUMERIC", "FLOAT", "DOUBLE"))
+
+
+def is_date_col(col_name, col_type):
+    return "date" in col_name.lower() and "TEXT" in col_type
 
 
 # ── Per-table profiler ────────────────────────────────────────────────────────
 
-def profile_table(engine, table_name):
+def profile_table(conn, table):
     lines = []
+    columns = get_columns(conn, table)
+    n_rows  = row_count(conn, table)
 
-    with engine.connect() as conn:
-        df = pd.read_sql_table(table_name, conn)
-
-    n_rows, n_cols = df.shape
-    lines.append(f"\n{divider()}")
-    lines.append(f"  TABLE: {table_name}   ({n_rows:,} rows  ×  {n_cols} columns)")
-    lines.append(divider())
+    lines.append(f"\n{rule()}")
+    lines.append(f"  TABLE: {table}   ({n_rows:,} rows  ×  {len(columns)} columns)")
+    lines.append(rule())
 
     if n_rows == 0:
         lines.append("  [empty table — no further profiling]")
@@ -89,65 +135,58 @@ def profile_table(engine, table_name):
 
     # ── Column overview ───────────────────────────────────────────────────────
     lines.append(
-        f"\n  {'Column':<35} {'Type':<10} {'Nulls':>8}  {'%Null':>6}  {'Distinct':>9}"
+        f"\n  {'Column':<35} {'SQLite Type':<10} {'Nulls':>8}  {'%Null':>6}  {'Distinct':>9}"
     )
     lines.append(f"  {'─'*35} {'─'*10} {'─'*8}  {'─'*6}  {'─'*9}")
 
-    col_details = []
-    for col in df.columns:
-        series   = df[col]
-        dtype    = str(series.dtype)
-        nulls    = int(series.isna().sum())
-        distinct = int(series.nunique(dropna=True))
-        pct      = f"{nulls / n_rows * 100:5.1f}%" if n_rows else "  n/a"
+    num_cols  = []
+    date_cols = []
+    text_cols = []
+
+    for col, ctype in columns:
+        null_count, null_pct, distinct = col_stats(conn, table, col, n_rows)
         lines.append(
-            f"  {col:<35} {dtype:<10} {nulls:>8,}  {pct:>6}  {distinct:>9,}"
+            f"  {col:<35} {ctype:<10} {null_count:>8,}  {null_pct:>6}  {distinct:>9,}"
         )
-        col_details.append((col, series, dtype, nulls, distinct))
+        if is_numeric(ctype):
+            num_cols.append(col)
+        elif is_date_col(col, ctype):
+            date_cols.append(col)
+        elif distinct <= FREQ_CARD_LIMIT and distinct > 1:
+            text_cols.append((col, distinct))
 
     # ── Numeric statistics ────────────────────────────────────────────────────
-    num_cols = df.select_dtypes(include="number").columns.tolist()
     if num_cols:
-        lines.append(f"\n  {'── Numeric statistics ':-<70}")
-        stats = df[num_cols].describe().T[["min", "mean", "max", "std"]].round(2)
+        lines.append(f"\n  {'── Numeric statistics ':-<{W-2}}")
         lines.append(
-            f"\n  {'Column':<35} {'Min':>12} {'Mean':>12} {'Max':>12} {'Std':>12}"
+            f"\n  {'Column':<35} {'Min':>12} {'Avg':>12} {'Max':>12}"
         )
-        lines.append(f"  {'─'*35} {'─'*12} {'─'*12} {'─'*12} {'─'*12}")
-        for col, row in stats.iterrows():
-            lines.append(
-                f"  {col:<35} {row['min']:>12,.2f} {row['mean']:>12,.2f} "
-                f"{row['max']:>12,.2f} {row['std']:>12,.2f}"
-            )
+        lines.append(f"  {'─'*35} {'─'*12} {'─'*12} {'─'*12}")
+        for col in num_cols:
+            mn, mx, avg = numeric_stats(conn, table, col)
+            mn  = f"{mn:,.2f}"  if mn  is not None else "NULL"
+            mx  = f"{mx:,.2f}"  if mx  is not None else "NULL"
+            avg = f"{avg:,.2f}" if avg is not None else "NULL"
+            lines.append(f"  {col:<35} {mn:>12} {avg:>12} {mx:>12}")
 
     # ── Date ranges ───────────────────────────────────────────────────────────
-    date_cols = [
-        col for col, s, dtype, _, _ in col_details
-        if dtype == "object" and is_date_col(s)
-    ]
     if date_cols:
-        lines.append(f"\n  {'── Date ranges ':-<70}")
+        lines.append(f"\n  {'── Date ranges ':-<{W-2}}")
         lines.append(f"\n  {'Column':<35} {'Min':<26} {'Max':<26}")
         lines.append(f"  {'─'*35} {'─'*26} {'─'*26}")
         for col in date_cols:
-            parsed = pd.to_datetime(df[col], errors="coerce")
-            lines.append(
-                f"  {col:<35} {str(parsed.min()):<26} {str(parsed.max()):<26}"
-            )
+            mn, mx = date_range(conn, table, col)
+            lines.append(f"  {col:<35} {str(mn):<26} {str(mx):<26}")
 
-    # ── Top-N frequencies (low-cardinality text) ──────────────────────────────
-    text_cols = [
-        (col, s) for col, s, dtype, _, distinct in col_details
-        if dtype == "object"
-        and 1 < distinct <= FREQ_CARD_LIMIT
-        and col not in date_cols
-    ]
+    # ── Top-N frequencies ─────────────────────────────────────────────────────
     if text_cols:
-        lines.append(f"\n  {'── Top {TOP_N} values (low-cardinality columns) ':-<70}")
-        for col, s in text_cols:
-            top = s.value_counts().head(TOP_N)
+        lines.append(f"\n  {'── Top {TOP_N} values (low-cardinality columns) ':-<{W-2}}")
+        for col, _ in text_cols:
+            top = top_values(conn, table, col)
+            if not top:
+                continue
             lines.append(f"\n  {col}:")
-            for val, cnt in top.items():
+            for val, cnt in top:
                 bar = "█" * min(int(cnt / n_rows * 40), 40)
                 lines.append(f"    {str(val):<30} {cnt:>8,}  {bar}")
 
@@ -156,21 +195,20 @@ def profile_table(engine, table_name):
 
 # ── Summary table ─────────────────────────────────────────────────────────────
 
-def summary_table(engine, tables):
+def summary_table(conn, tables):
     lines = [
         "",
         f"  {'Table':<35} {'Rows':>10} {'Columns':>8}",
         f"  {'─'*35} {'─'*10} {'─'*8}",
     ]
-    total_rows = 0
-    with engine.connect() as conn:
-        for t in tables:
-            df         = pd.read_sql_table(t, conn)
-            rows, cols = df.shape
-            total_rows += rows
-            lines.append(f"  {t:<35} {rows:>10,} {cols:>8}")
+    total = 0
+    for t in tables:
+        cols = get_columns(conn, t)
+        rows = row_count(conn, t)
+        total += rows
+        lines.append(f"  {t:<35} {rows:>10,} {len(cols):>8}")
     lines.append(f"  {'─'*35} {'─'*10} {'─'*8}")
-    lines.append(f"  {'TOTAL':<35} {total_rows:>10,}")
+    lines.append(f"  {'TOTAL':<35} {total:>10,}")
     return "\n".join(lines)
 
 
@@ -181,9 +219,8 @@ def main():
         print(f"ERROR: {DB_PATH} not found. Run build_db.py first.")
         sys.exit(1)
 
-    engine      = create_engine(f"sqlite:///{DB_PATH}")
-    inspector   = inspect(engine)
-    all_tables  = sorted(inspector.get_table_names())
+    conn       = sqlite3.connect(DB_PATH)
+    all_tables = get_tables(conn)
 
     # Parse args
     summary_only = "--summary" in sys.argv
@@ -194,7 +231,7 @@ def main():
             target_table = sys.argv[idx + 1]
             if target_table not in all_tables:
                 print(f"ERROR: Table '{target_table}' not found.")
-                print(f"Available tables: {', '.join(all_tables)}")
+                print(f"Available: {', '.join(all_tables)}")
                 sys.exit(1)
 
     tables_to_profile = [target_table] if target_table else all_tables
@@ -210,31 +247,28 @@ def main():
     ))
 
     output.append(section("SUMMARY — Row & Column Counts"))
-    output.append(summary_table(engine, all_tables))
+    output.append(summary_table(conn, all_tables))
 
     if not summary_only:
         output.append(section("DETAILED COLUMN PROFILES"))
         for i, table in enumerate(tables_to_profile, 1):
-            print(f"  Profiling {table} ({i}/{len(tables_to_profile)})...", end="\r")
-            output.append(profile_table(engine, table))
+            print(f"  Profiling {table} ({i}/{len(tables_to_profile)})...", end="\r", flush=True)
+            output.append(profile_table(conn, table))
         print(" " * 60, end="\r")
 
-    report = "\n".join(output) + "\n"
+    conn.close()
 
-    # Print to console
+    report = "\n".join(output) + "\n"
     print(report)
 
-    # Save report to profiling/reports/
+    # Save to file (full runs only)
     if not target_table:
-        report_name = f"profile_{timestamp}.txt"
-    else:
-        report_name = f"profile_{target_table}_{timestamp}.txt"
-
-    os.makedirs(REPORTS_DIR, exist_ok=True)
-    report_path = os.path.join(REPORTS_DIR, report_name)
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write(report)
-    print(f"Report saved to: profiling/reports/{report_name}")
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        name = f"profile_{timestamp}.txt"
+        path = os.path.join(REPORTS_DIR, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(report)
+        print(f"Report saved to: profiling/reports/{name}")
 
 
 if __name__ == "__main__":
