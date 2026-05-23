@@ -1,23 +1,40 @@
 #!/usr/bin/env bash
 # setup.sh — Build, load, materialize, and export.
 #
+# Smart step skipping: each step is skipped if its output already exists.
+# Use --force to rebuild everything from scratch.
+#
 # Tracks step durations in .step_timings after each run.
 # On subsequent runs, shows projected time remaining per step.
-# First run shows elapsed time only (no prior data to estimate from).
 
 set -e
 
 TIMINGS_FILE=".step_timings"
+FORCE=false
+[[ "${1:-}" == "--force" ]] && FORCE=true
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 fmt() {
-    # Under 60s: show seconds only. 60s+: show Xm Ys.
     if [[ $1 -lt 60 ]]; then
         printf "%ds" "$1"
     else
         printf "%dm %ds" $(($1 / 60)) $(($1 % 60))
     fi
+}
+
+row_count() {
+    # Return row count for a table, or 0 if db/table doesn't exist
+    python -c "
+import sqlite3, sys
+try:
+    conn = sqlite3.connect('contoso.db')
+    n = conn.execute('SELECT COUNT(*) FROM [${1}];').fetchone()[0]
+    conn.close()
+    print(n)
+except:
+    print(0)
+" 2>/dev/null
 }
 
 # ── Load timings from last run ────────────────────────────────────────────────
@@ -46,7 +63,7 @@ eta_from() {
     echo $sum
 }
 
-# ── Row count summary ────────────────────────────────────────────────────────
+# ── Row count summary ─────────────────────────────────────────────────────────
 
 show_counts() {
     python - <<'PYEOF'
@@ -76,6 +93,14 @@ PYEOF
 
 # ── Step runner ───────────────────────────────────────────────────────────────
 
+skip_step() {
+    local key=$1 label=$2 reason=$3
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    echo ""
+    printf "  ─── [%d/%d] %s — skipped (%s)\n" \
+        "$CURRENT_STEP" "$TOTAL_STEPS" "$label" "$reason"
+}
+
 run_step() {
     local key=$1 label=$2
     shift 2
@@ -103,21 +128,41 @@ run_step() {
 
 TOTAL_START=$(date +%s)
 echo "════════════════════════════════════════════════════════════════"
-echo "  ContosoDW Setup"
+echo "  ContosoDW Setup${FORCE:+  [--force]}"
 echo "════════════════════════════════════════════════════════════════"
 
-run_step build  "Building schema"             python build_db.py
-run_step load   "Loading data from Kaggle"    python load_data.py
-show_counts
-run_step marts  "Building analytical tables"  bash -c "sqlite3 contoso.db < analysis/build_marts.sql"
-show_counts
-
-if python -c "import pyarrow" 2>/dev/null; then
-    run_step export "Exporting to Parquet"    python scripts/export_for_powerbi.py
+# Step 1 — Build schema
+FACT_ROWS=$(row_count FactSales)
+if $FORCE || [[ $FACT_ROWS -eq 0 ]]; then
+    run_step build "Building schema" python build_db.py
 else
+    skip_step build "Building schema" "contoso.db already has data"
+fi
+
+# Step 2 — Load data
+if $FORCE || [[ $FACT_ROWS -eq 0 ]]; then
+    run_step load "Loading data from Kaggle" python load_data.py
+    show_counts
+else
+    skip_step load "Loading data from Kaggle" "FactSales has ${FACT_ROWS} rows"
+fi
+
+# Step 3 — Build marts
+MART_ROWS=$(row_count AllSales)
+if $FORCE || [[ $MART_ROWS -eq 0 ]]; then
+    run_step marts "Building analytical tables" bash -c "sqlite3 contoso.db < analysis/build_marts.sql"
+    show_counts
+else
+    skip_step marts "Building analytical tables" "AllSales has ${MART_ROWS} rows"
+fi
+
+# Step 4 — Export
+if python -c "import pyarrow" 2>/dev/null; then
+    run_step export "Exporting to Parquet" python scripts/export_for_powerbi.py
+else
+    CURRENT_STEP=$((CURRENT_STEP + 1))
     echo ""
-    echo "  [skipped] Parquet export — pyarrow not installed"
-    echo "            pip install pyarrow && python scripts/export_for_powerbi.py"
+    echo "  [skipped] Parquet export — run: pip install pyarrow"
 fi
 
 # ── Save timings for next run ─────────────────────────────────────────────────
@@ -132,4 +177,6 @@ TOTAL=$(( $(date +%s) - TOTAL_START ))
 echo ""
 echo "════════════════════════════════════════════════════════════════"
 printf "  All done — total time: %s\n" "$(fmt $TOTAL)"
+$FORCE || [[ $FACT_ROWS -eq 0 ]] || \
+    echo "  Tip: run ./setup.sh --force to rebuild from scratch."
 echo "════════════════════════════════════════════════════════════════"
