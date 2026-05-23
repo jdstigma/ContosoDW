@@ -1,9 +1,7 @@
-# SQLite database files
+# SQLite database files — built locally, never committed
 *.db-shm
 *.db-wal
 *.db
-# Allow the main database - auto-rebuilt by GitHub Actions on schema changes
-!contoso.db
 
 # Python
 __pycache__/
