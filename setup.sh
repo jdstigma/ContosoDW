@@ -75,7 +75,7 @@ PYEOF
 run_step() {
     local key=$1 label=$2
     shift 2
-    ((CURRENT_STEP++))
+    CURRENT_STEP=$((CURRENT_STEP + 1))
 
     local remaining
     remaining=$(eta_from $((CURRENT_STEP - 1)))
