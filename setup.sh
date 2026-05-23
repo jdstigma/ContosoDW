@@ -116,7 +116,21 @@ run_step() {
 
     local t0
     t0=$(date +%s)
+
+    # Background timer — prints elapsed every 10s for steps with no output
+    (
+        while true; do
+            sleep 10
+            elapsed=$(( $(date +%s) - t0 ))
+            printf "\r  ⏱  %s elapsed..." "$(fmt $elapsed)"
+        done
+    ) &
+    local TIMER_PID=$!
+
     "$@"
+
+    kill $TIMER_PID 2>/dev/null
+    wait $TIMER_PID 2>/dev/null
     local elapsed=$(( $(date +%s) - t0 ))
 
     T[$key]=$elapsed
