@@ -12,4 +12,8 @@ echo "=== Loading data ==="
 python load_data.py
 
 echo ""
+echo "=== Building analytical tables ==="
+sqlite3 contoso.db < analysis/build_marts.sql
+
+echo ""
 echo "=== Done ==="
