@@ -128,43 +128,65 @@ def get_db_columns(conn, table_name):
     return {row[1].lower(): row[1] for row in rows}
 
 
+CHUNK_SIZE = 5_000  # rows per batch — keeps memory low for large Fact tables
+
+
 def load_csv_into_table(conn, table_name, csv_path):
     """
-    Insert all rows from a CSV file into a SQLite table.
-    Column matching is case-insensitive.
-    Returns the number of rows inserted.
+    Stream a CSV file in chunks and insert into SQLite.
+    Never loads the whole file into memory — safe for multi-million-row tables.
+    Returns the total number of rows inserted.
     """
     with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        rows   = list(reader)
+        reader    = csv.DictReader(f)
+        first_row = next(reader, None)
 
-    if not rows:
-        return 0
+        if first_row is None:
+            return 0
 
-    db_cols    = get_db_columns(conn, table_name)
-    csv_heads  = list(rows[0].keys())
+        # Build column mapping from CSV headers → DB column names (case-insensitive)
+        db_cols  = get_db_columns(conn, table_name)
+        col_map  = {
+            h: db_cols[h.lower()]
+            for h in first_row.keys()
+            if h.lower() in db_cols
+        }
 
-    # Map CSV header → DB column name (case-insensitive)
-    col_map = {h: db_cols[h.lower()] for h in csv_heads if h.lower() in db_cols}
+        if not col_map:
+            print(f"  WARNING  {table_name}: no matching columns — skipping")
+            return 0
 
-    if not col_map:
-        print(f"  WARNING  {table_name}: no matching columns — skipping")
-        return 0
+        db_col_list  = list(col_map.values())
+        placeholders = ", ".join(["?"] * len(db_col_list))
+        col_str      = ", ".join(f"[{c}]" for c in db_col_list)
+        sql          = (
+            f"INSERT OR IGNORE INTO [{table_name}] ({col_str}) VALUES ({placeholders})"
+        )
 
-    db_col_list  = list(col_map.values())
-    placeholders = ", ".join(["?"] * len(db_col_list))
-    col_str      = ", ".join(f"[{c}]" for c in db_col_list)
-    sql          = (
-        f"INSERT OR IGNORE INTO [{table_name}] ({col_str}) VALUES ({placeholders})"
-    )
+        def row_to_values(row):
+            return [row.get(h) or None for h in col_map]
 
-    values = [
-        [row.get(csv_h) or None for csv_h in col_map]
-        for row in rows
-    ]
+        total = 0
+        chunk = [row_to_values(first_row)]
 
-    conn.executemany(sql, values)
-    return len(rows)
+        for row in reader:
+            chunk.append(row_to_values(row))
+
+            if len(chunk) >= CHUNK_SIZE:
+                conn.executemany(sql, chunk)
+                conn.commit()
+                total += len(chunk)
+                chunk  = []
+                # Overwrite the current line with live progress
+                print(f"  {table_name}: {total:>10,} rows...", end="\r", flush=True)
+
+        # Insert any remaining rows
+        if chunk:
+            conn.executemany(sql, chunk)
+            conn.commit()
+            total += len(chunk)
+
+    return total
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -222,7 +244,8 @@ def main():
                 print(f"{table_name:<35} {count:>10,}  (dry run)")
             else:
                 count = load_csv_into_table(conn, table_name, csv_path)
-                print(f"{table_name:<35} {count:>10,}")
+                # Clear the progress line then print the final count
+                print(f"{table_name:<35} {count:>10,}          ")
 
             loaded += 1
 
