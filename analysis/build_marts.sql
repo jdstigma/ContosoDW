@@ -120,7 +120,6 @@ SELECT
         WHEN c.FirstName IS NOT NULL
         THEN c.FirstName || ' ' || c.LastName
     END                                 AS CustomerName,
-    c.CustomerType,
     c.Gender,
     c.BirthDate,
     c.YearlyIncome,
@@ -142,7 +141,6 @@ SELECT
     pr.DiscountPercent,
 
     -- Currency
-    cu.CurrencyLabel,
     cu.CurrencyName,
 
     -- Measures
