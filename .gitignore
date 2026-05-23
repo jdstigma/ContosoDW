@@ -1,0 +1,12 @@
+# SQLite database - generated locally, never committed
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
