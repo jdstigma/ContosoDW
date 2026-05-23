@@ -125,12 +125,14 @@ select
     cg.ContinentName                    as CustomerContinent,
 
     -- Promotion
+    s.PromotionKey,
     pr.PromotionName,
     pr.PromotionType,
     pr.PromotionCategory,
     pr.DiscountPercent,
 
     -- Currency
+    s.CurrencyKey,
     cu.CurrencyName,
 
     -- Measures
