@@ -156,7 +156,12 @@ fi
 # Step 2 — Build marts
 MART_ROWS=$(row_count AllSales)
 if $FORCE || [[ $MART_ROWS -eq 0 ]]; then
-    run_step marts "Building AllSales mart" bash -c "duckdb contoso.duckdb < analysis/build_marts.sql"
+    run_step marts "Building AllSales mart" python -c "
+import duckdb
+conn = duckdb.connect('contoso.duckdb')
+conn.execute(open('analysis/build_marts.sql').read())
+conn.close()
+"
     show_counts
 else
     skip_step marts "Building AllSales mart" "AllSales has ${MART_ROWS} rows"
