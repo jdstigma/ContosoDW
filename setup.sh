@@ -46,20 +46,26 @@ eta_from() {
 
 show_counts() {
     python - <<'PYEOF'
-import sqlite3, os
+import sqlite3
 conn = sqlite3.connect("contoso.db")
 tables = [r[0] for r in conn.execute(
     "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 ).fetchall()]
-print(f"\n  {'Table':<35} {'Rows':>12}")
-print(f"  {'─'*35} {'─'*12}")
+
+counts = []
 total = 0
 for t in tables:
     n = conn.execute(f"SELECT COUNT(*) FROM [{t}];").fetchone()[0]
+    counts.append((t, n))
     total += n
-    print(f"  {t:<35} {n:>12,}")
-print(f"  {'─'*35} {'─'*12}")
-print(f"  {'TOTAL':<35} {total:>12,}")
+
+print(f"\n  {'Table':<35} {'Rows':>12}   {'% of Total':>10}")
+print(f"  {'─'*35} {'─'*12}   {'─'*10}")
+for t, n in counts:
+    pct = f"{n / total * 100:>9.1f}%" if total else "       n/a"
+    print(f"  {t:<35} {n:>12,}   {pct}")
+print(f"  {'─'*35} {'─'*12}   {'─'*10}")
+print(f"  {'TOTAL':<35} {total:>12,}   {'100.0%':>10}")
 conn.close()
 PYEOF
 }
