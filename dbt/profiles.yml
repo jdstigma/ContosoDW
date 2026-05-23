@@ -1,0 +1,8 @@
+contoso:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      # Override with CONTOSO_DB_PATH env var when the repo lives somewhere else
+      path: "{{ env_var('CONTOSO_DB_PATH', '../contoso.duckdb') }}"
+      threads: 4

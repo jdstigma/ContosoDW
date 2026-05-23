@@ -1,0 +1,64 @@
+version: 2
+
+models:
+
+  - name: all_sales
+    description: >
+      AllSales merges FactSales (in-store) and FactOnlineSales (online) into a
+      single fully de-normalised table. All dimension attributes are pre-joined
+      so every row is self-contained. SaleSource = 'Store' or 'Online'.
+      Customer columns are populated only for online rows.
+    columns:
+      - name: SaleKey
+        description: Primary key — surrogate from FactSales.SalesKey or FactOnlineSales.OnlineSalesKey.
+        tests: [not_null, unique]
+      - name: SaleSource
+        description: "'Store' or 'Online'."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Store', 'Online']
+      - name: SalesAmount
+        tests: [not_null]
+      - name: CalendarYear
+        tests: [not_null]
+      - name: ProductKey
+        tests: [not_null]
+      - name: StoreKey
+        tests: [not_null]
+      - name: GrossProfit
+        description: SalesAmount minus TotalCost.
+      - name: GrossMarginPct
+        description: GrossProfit / SalesAmount * 100, rounded to 2dp. NULL when SalesAmount = 0.
+      - name: NetSalesAmount
+        description: SalesAmount minus ReturnAmount.
+
+  - name: dim_product_enriched
+    description: >
+      DimProduct with ProductSubcategoryName and ProductCategoryName pre-joined.
+      Suitable for use as a Power BI dimension table.
+    columns:
+      - name: ProductKey
+        tests: [not_null, unique]
+      - name: ProductName
+        tests: [not_null]
+      - name: ProductCategoryName
+        tests: [not_null]
+
+  - name: dim_store_enriched
+    description: >
+      DimStore with city, state, country, and continent from DimGeography pre-joined.
+    columns:
+      - name: StoreKey
+        tests: [not_null, unique]
+      - name: StoreName
+        tests: [not_null]
+
+  - name: dim_customer_enriched
+    description: >
+      DimCustomer with geography columns pre-joined. Covers online customers only.
+    columns:
+      - name: CustomerKey
+        tests: [not_null, unique]
+      - name: CustomerName
+        description: FirstName + LastName concatenated.

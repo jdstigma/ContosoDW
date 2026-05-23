@@ -1,0 +1,79 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Raw tables loaded into contoso.duckdb by load_data.py from the
+      Kaggle "cleaned-contoso-dataset" CSVs.
+    tables:
+      - name: FactSales
+        description: In-store, catalog, and reseller transactions.
+        columns:
+          - name: SalesKey
+            description: Primary key.
+            tests:
+              - not_null
+              - unique
+          - name: DateKey
+            tests: [not_null]
+          - name: ProductKey
+            tests: [not_null]
+
+      - name: FactOnlineSales
+        description: Online (e-commerce) transactions.
+        columns:
+          - name: OnlineSalesKey
+            description: Primary key.
+            tests:
+              - not_null
+              - unique
+
+      - name: DimProduct
+        columns:
+          - name: ProductKey
+            tests: [not_null, unique]
+
+      - name: DimProductSubcategory
+        columns:
+          - name: ProductSubcategoryKey
+            tests: [not_null, unique]
+
+      - name: DimProductCategory
+        columns:
+          - name: ProductCategoryKey
+            tests: [not_null, unique]
+
+      - name: DimStore
+        columns:
+          - name: StoreKey
+            tests: [not_null, unique]
+
+      - name: DimCustomer
+        columns:
+          - name: CustomerKey
+            tests: [not_null, unique]
+
+      - name: DimGeography
+        columns:
+          - name: GeographyKey
+            tests: [not_null, unique]
+
+      - name: DimDate
+        columns:
+          - name: DateKey
+            tests: [not_null, unique]
+
+      - name: DimChannel
+        columns:
+          - name: ChannelKey
+            tests: [not_null, unique]
+
+      - name: DimPromotion
+        columns:
+          - name: PromotionKey
+            tests: [not_null, unique]
+
+      - name: DimCurrency
+        columns:
+          - name: CurrencyKey
+            tests: [not_null, unique]

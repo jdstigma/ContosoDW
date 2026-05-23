@@ -18,6 +18,11 @@ exports/
 # Step timing cache (local state for setup.sh progress estimates)
 .step_timings
 
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
 # OS
 .DS_Store
 Thumbs.db

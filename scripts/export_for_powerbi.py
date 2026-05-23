@@ -26,7 +26,16 @@ REPO_ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH     = os.path.join(REPO_ROOT, "contoso.duckdb")
 EXPORTS_DIR = os.path.join(REPO_ROOT, "exports")
 
-DEFAULT_TABLES = ["AllSales", "DimDate"]
+DEFAULT_TABLES = [
+    "AllSales",
+    "DimDate",
+    "DimProductEnriched",
+    "DimStoreEnriched",
+    "DimCustomerEnriched",
+    "DimChannel",
+    "DimPromotion",
+    "DimCurrency",
+]
 
 
 def export_table(conn, table, out_dir):

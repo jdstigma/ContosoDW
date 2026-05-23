@@ -176,9 +176,93 @@ LEFT JOIN DimGeography          cg   ON c.GeographyKey    = cg.GeographyKey
 LEFT JOIN DimPromotion          pr   ON s.PromotionKey    = pr.PromotionKey
 LEFT JOIN DimCurrency           cu   ON s.CurrencyKey     = cu.CurrencyKey;
 
+-- ============================================================
+-- DimProductEnriched
+-- DimProduct with subcategory and category names pre-joined.
+-- ============================================================
+
+DROP TABLE IF EXISTS DimProductEnriched;
+
+CREATE TABLE DimProductEnriched AS
+SELECT
+    p.ProductKey,
+    p.ProductName,
+    p.BrandName,
+    p.ColorName,
+    p.ClassName,
+    p.StyleName,
+    p.Status                        AS ProductStatus,
+    p.UnitCost,
+    p.UnitPrice,
+    psc.ProductSubcategoryKey,
+    psc.ProductSubcategoryName,
+    pc.ProductCategoryKey,
+    pc.ProductCategoryName
+FROM DimProduct            p
+LEFT JOIN DimProductSubcategory psc ON p.ProductSubcategoryKey  = psc.ProductSubcategoryKey
+LEFT JOIN DimProductCategory    pc  ON psc.ProductCategoryKey   = pc.ProductCategoryKey;
+
+-- ============================================================
+-- DimStoreEnriched
+-- DimStore with geography columns pre-joined.
+-- ============================================================
+
+DROP TABLE IF EXISTS DimStoreEnriched;
+
+CREATE TABLE DimStoreEnriched AS
+SELECT
+    st.StoreKey,
+    st.StoreName,
+    st.StoreType,
+    st.Status                       AS StoreStatus,
+    st.OpenDate                     AS StoreOpenDate,
+    st.CloseDate                    AS StoreCloseDate,
+    st.EmployeeCount,
+    st.SellingAreaSize,
+    g.CityName                      AS StoreCity,
+    g.StateProvinceName             AS StoreState,
+    g.RegionCountryName             AS StoreCountry,
+    g.ContinentName                 AS StoreContinent
+FROM DimStore       st
+LEFT JOIN DimGeography g ON st.GeographyKey = g.GeographyKey;
+
+-- ============================================================
+-- DimCustomerEnriched
+-- DimCustomer with geography columns pre-joined.
+-- ============================================================
+
+DROP TABLE IF EXISTS DimCustomerEnriched;
+
+CREATE TABLE DimCustomerEnriched AS
+SELECT
+    c.CustomerKey,
+    c.FirstName || ' ' || c.LastName AS CustomerName,
+    c.Gender,
+    c.BirthDate,
+    c.MaritalStatus,
+    c.YearlyIncome,
+    c.Education,
+    c.Occupation,
+    c.NumberCarsOwned,
+    c.TotalChildren,
+    c.NumberChildrenAtHome,
+    c.HouseOwnerFlag,
+    g.CityName                      AS CustomerCity,
+    g.StateProvinceName             AS CustomerState,
+    g.RegionCountryName             AS CustomerCountry,
+    g.ContinentName                 AS CustomerContinent
+FROM DimCustomer    c
+LEFT JOIN DimGeography g ON c.GeographyKey = g.GeographyKey;
+
 -- Verification
 SELECT
     COUNT(*)                                        AS TotalRows,
     SUM(CASE WHEN SaleSource = 'Store'  THEN 1 END) AS StoreRows,
     SUM(CASE WHEN SaleSource = 'Online' THEN 1 END) AS OnlineRows
 FROM AllSales;
+
+SELECT 'DimProductEnriched'  AS Mart, COUNT(*) AS Rows FROM DimProductEnriched
+UNION ALL
+SELECT 'DimStoreEnriched',          COUNT(*) FROM DimStoreEnriched
+UNION ALL
+SELECT 'DimCustomerEnriched',       COUNT(*) FROM DimCustomerEnriched;
