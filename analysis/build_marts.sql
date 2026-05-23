@@ -78,12 +78,12 @@ SELECT
     -- Date
     s.DateKey,
     d.CalendarYear,
-    d.CalendarQuarter,
+    TRY_CAST(REPLACE(d.CalendarQuarterLabel, 'Q', '') AS BIGINT) AS CalendarQuarter,
     d.CalendarQuarterLabel,
-    d.CalendarMonth,
+    d.MonthNumber                                                 AS CalendarMonth,
     d.CalendarMonthLabel,
     d.FiscalYear,
-    d.FiscalQuarter,
+    TRY_CAST(REPLACE(d.FiscalQuarterLabel,   'Q', '') AS BIGINT) AS FiscalQuarter,
 
     -- Channel
     COALESCE(ch.ChannelName, 'Online')  AS ChannelName,
