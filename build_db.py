@@ -12,8 +12,9 @@ import sqlite3
 import os
 import sys
 
-DB_PATH     = "contoso.db"
-SCHEMA_PATH = "schema_sqlite.sql"
+DB_PATH      = "contoso.db"
+SCHEMA_PATH  = "schema_sqlite.sql"
+INDEXES_PATH = "indexes_sqlite.sql"
 
 
 def build_db():
@@ -25,6 +26,8 @@ def build_db():
         print(f"ERROR: {SCHEMA_PATH} not found.")
         sys.exit(1)
 
+    indexes_path = os.path.join(base, INDEXES_PATH)
+
     if os.path.exists(db_path):
         os.remove(db_path)
         print(f"Removed existing {DB_PATH}")
@@ -32,9 +35,16 @@ def build_db():
     with open(schema_path, "r") as f:
         schema = f.read()
 
+    with open(indexes_path, "r") as f:
+        indexes = f.read()
+
     conn = sqlite3.connect(db_path)
     try:
+        print("Creating tables...")
         conn.executescript(schema)
+        conn.commit()
+        print("Creating indexes...")
+        conn.executescript(indexes)
         conn.commit()
         print(f"Created {DB_PATH} successfully.\n")
     except sqlite3.Error as e:
