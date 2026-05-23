@@ -86,6 +86,7 @@ SELECT
     TRY_CAST(REPLACE(d.FiscalQuarterLabel,   'Q', '') AS BIGINT) AS FiscalQuarter,
 
     -- Channel
+    s.ChannelKey,
     COALESCE(ch.ChannelName, 'Online')  AS ChannelName,
 
     -- Store
