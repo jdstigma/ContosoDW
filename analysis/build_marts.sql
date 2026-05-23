@@ -22,7 +22,7 @@ WITH merged AS (
         NULL                     AS SalesOrderNumber,
         NULL::INTEGER            AS SalesOrderLineNumber,
         fs.DateKey,
-        fs.channelKey            AS ChannelKey,
+        COALESCE(fs.channelKey, -1)::INTEGER AS ChannelKey,
         fs.StoreKey,
         fs.ProductKey,
         fs.PromotionKey,
@@ -48,7 +48,7 @@ WITH merged AS (
         fos.SalesOrderNumber,
         fos.SalesOrderLineNumber,
         fos.DateKey,
-        NULL::INTEGER            AS ChannelKey,
+        -1::INTEGER              AS ChannelKey,
         fos.StoreKey,
         fos.ProductKey,
         fos.PromotionKey,
@@ -178,6 +178,19 @@ LEFT JOIN DimCustomer           c    ON s.CustomerKey     = c.CustomerKey
 LEFT JOIN DimGeography          cg   ON c.GeographyKey    = cg.GeographyKey
 LEFT JOIN DimPromotion          pr   ON s.PromotionKey    = pr.PromotionKey
 LEFT JOIN DimCurrency           cu   ON s.CurrencyKey     = cu.CurrencyKey;
+
+-- ============================================================
+-- DimChannelEnriched
+-- DimChannel with an extra row (ChannelKey = -1) to capture
+-- online sales that have no channel key in the source data.
+-- ============================================================
+
+DROP TABLE IF EXISTS DimChannelEnriched;
+
+CREATE TABLE DimChannelEnriched AS
+SELECT ChannelKey, ChannelName FROM DimChannel
+UNION ALL
+SELECT -1, 'Unspecified';
 
 -- ============================================================
 -- DimProductEnriched

@@ -32,7 +32,7 @@ DEFAULT_TABLES = [
     "DimProductEnriched",
     "DimStoreEnriched",
     "DimCustomerEnriched",
-    "DimChannel",
+    "DimChannelEnriched",
     "DimPromotion",
     "DimCurrency",
 ]
